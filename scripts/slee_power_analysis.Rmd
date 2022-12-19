@@ -1,5 +1,5 @@
 ---
-title: "Small Intestine Power Analysis"
+title: "Sanghyun Lee Bulk RNASeq Power Analysis"
 output: html_document
 date: "2022-12-13"
 ---
@@ -8,7 +8,12 @@ date: "2022-12-13"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Executive Summary:
+
+- We used `GSE143290` a mouse bulk RNASeq experiment on the small intenstine infection vs. control group as our reference data-set for power analysis.
+- We applied power analysis using the `Trex1` and `Ifrd11` and their related genes (identified by string-db.org) as the list of genes we wanted to have enough statistical power to test for in an experiment; and what is the minimum number of samples we needed to reach this sufficient power (>80%).
+- We also applied power analysis by segmenting those genes by their gene-level expression (highly, medium and lowly expressed); and investigate whether what is the minimum sample size we needed to reach sufficient power.
+- In both cases, we see `n>=13` as the threshold to reach sufficient power.
 
 ```{r, loading, include=FALSE}
 # package loading
@@ -19,6 +24,12 @@ library(ggplot2)
 library(biomaRt)
 set.seed(538734517)
 ```
+
+## Selecting the Study
+![](https://i.imgur.com/0CMFEsV.png)
+
+![](https://i.imgur.com/Jz8BJPE.png)
+
 
 ## Parsing DataMat
 
@@ -31,8 +42,9 @@ colnames(dataMat) <- c("VAS_Control_1", "VAS_Control_2", "VAS_Control_3", "VAS_I
 head(dataMat)
 ```
 
-#IFNB, use string-db
-
+# Gene of Interest Selection
+![](https://i.imgur.com/lc0fCyU.png)
+![](https://i.imgur.com/BFGgEio.png)
 
 ## Power analysis
 
@@ -90,7 +102,7 @@ mean(power18$power)
 gene_readcounts <- distribution$pseudo.counts.mean[which(names(distribution$pseudo.counts.mean) %in% genelist$Gene.name)]
 gene_dispersions <- distribution$tagwise.dispersion[which(names(distribution$pseudo.counts.mean) %in% genelist$Gene.name)]
 
-head(gene_readcounts)
+gene_readcounts
 
 mean(gene_readcounts)
 mean(gene_dispersions)
@@ -208,7 +220,73 @@ simres = runSims(sim.opts=simOptions,nsims=20)
 powers = comparePower(simres, alpha.type='fdr', alpha.nominal=0.1, stratify.by='expr')
 ```
 
-### TO-DO: Simulating Power for Highly Expressed, Medium Expressed and Lowly Expressed Genes
 
+### Fitting a Negative Binomial Distribution and Binning Genes into Highly, Medium and Lowly Expressed Genes
+
+```{r}
+library(fitdistrplus)
+
+samples <- as.numeric(array(distribution$pseudo.counts.mean))
+samples <-  as.integer(samples)
+negbinom <- fitdist(samples, "nbinom")
+summary(negbinom)
+quantile(negbinom)
+plot(negbinom)
+```
+
+### Binning the Genes into their expression level
+
+Based on the quantiles as calculated by the fitted negative binomial distribution, we can bin the genes of interest into the following three bins:
+
+Highly expressed genes (p >0.7 or gene count > 1250):
+`c("Fau", "Dad1", "Sin3b", "Rpn1", "Ddost", "Ostc")`
+
+Medium expressioned genes (0.4<p<0.7)
+`c("Trex1", "Rnaseh2a", "Mef2c", "Sap30", "Tusc3")`
+
+Lowly expressioned genes (p<0.4):
+`c("Dixdc1", "Bhlhb9")` plus some randomly selected genes `"c(Sox17", "Xkr4", "A830018L16Rik")` to get to a total of 5 genes.
+
+### Plotting Power by Highly, Medium and Lowly Expressed Genes
+
+```{r}
+n <- 1:15
+gene_powers <- lapply(n, function(x) est_power_distribution(n=x, f=0.1, rho=2, distributionObject=distribution, m=52000,m1=4000,selectedGenes=c("Fau", "Dad1", "Sin3b", "Rpn1", "Ddost", "Ostc"),storeProcess=TRUE)$power)
+num_genes <- sapply(gene_powers,function(x) sum(x>0.8))
+gene_powers_keptfinal <- lapply(n, function(x) est_power_distribution(n=x, f=0.1, rho=2, distributionObject=distribution, m=52000,m1=4000,selectedGenes=c("Fau", "Dad1", "Sin3b", "Rpn1", "Ddost", "Ostc"),storeProcess=TRUE)$power)
+
+
+gene_powers2 <- lapply(n, function(x) est_power_distribution(n=x, f=0.1, rho=2, maxAveCount = 50000, distributionObject=distribution, m=52000,m1=4000,selectedGenes=c("Trex1", "Rnaseh2a", "Mef2c", "Sap30", "Tusc3"),storeProcess=TRUE)$power)
+num_genes <- sapply(gene_powers2,function(x) sum(x>0.8))
+gene_powers_keptfinal2 <- lapply(n, function(x) est_power_distribution(n=x, f=0.1, rho=2, distributionObject=distribution, m=52000,m1=4000,selectedGenes=c("Trex1", "Rnaseh2a", "Mef2c", "Sap30", "Tusc3"),storeProcess=TRUE)$power)
+
+
+gene_powers3 <- lapply(n, function(x) est_power_distribution(n=x, f=0.1, rho=2, distributionObject=distribution, m=52000,m1=4000,selectedGenes=c("Dixdc1", "Bhlhb9", "Sox17", "Xkr4", "A830018L16Rik"), storeProcess=TRUE)$power)
+#num_genes <- sapply(gene_powers3,function(x) sum(x>0.8))
+#gene_powers_keptfinal3 <- lapply(n, function(x) est_power_distribution(n=x, f=0.1, rho=2, distributionObject=distribution, m=52000,m1=4000,selectedGenes=c("Dixdc1", "Bhlhb9"),storeProcess=TRUE)$power)
+
+# Trex1:
+musk_id <- which(found$Gene.name=='Trex1')
+musk_power <- sapply(gene_powers, function(x) x[musk_id])
+
+# Ifrd1:
+ifrd1_id <- which(found$Gene.name=='Ifrd1')
+ifrd1_power <- sapply(gene_powers, function(x) x[ifrd1_id])
+
+total_power_high <- sapply(gene_powers, function(x) mean(x))
+total_power_medium <- sapply(gene_powers2, function(x) mean(x))
+total_power_low <- sapply(gene_powers3, function(x) mean(x))
+
+
+total_keptfinal <- sapply(gene_powers_keptfinal, function(x) mean(x))
+
+# Gene powers random
+gene_powers_random <- sapply(n, function(x) est_power_distribution(n=x, f=0.1, rho=2, distributionObject=distribution, m=52000,m1=4000))
+
+# Power to detect musk and total power vs number of samples
+d2 <- data.frame(n,total_power_high,total_power_medium,total_power_low,gene_powers_random) %>% tidyr::gather("type","power", total_power_high,total_power_medium,total_power_low,gene_powers_random)
+
+ggplot(data=d2,aes(x=n)) + geom_line(aes(y=power,color=type)) + geom_point(aes(y=power,color=type)) + theme_bw() + ylab("Power") + xlab("Number of samples in each group") + ggtitle("Power for Highly, Medium and Lowly Expressed genes and total power\n as number of samples increases") + labs(caption="FDR=0.1,log fold change=2,number of random genes=100") + geom_hline(yintercept=0.8,linetype='dashed') + scale_color_discrete(name="Power",breaks=c("total_power_high","total_power_medium","total_power_low","gene_powers_random"),labels=c("Highly Expressed Genes", "Medium Expressed Genes","Lowly Expressed Genes","Random Genes")) + scale_x_continuous(breaks=seq(1,15,2)) + scale_y_continuous(breaks=seq(0,1,0.2))
+```
 
 # References
