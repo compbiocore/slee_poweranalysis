@@ -41,11 +41,13 @@ RNAseqsamplesize [@Zhao2018] was used to do the analysis. With expected fold cha
 ```{r, power, tidy=TRUE, warning=FALSE}
 # estimate gene read count and dispersion distribution
 distribution <- est_count_dispersion(dataMat,group=c(0,0,0,1,1,1))
-genelist <- {}
-genelist$Gene.name <- c("Trex1", "Ifrd1", "Wrn","Atrip","Exo1","Rnaseh2b","Mb21d1","Rnaseh2a","Nme1","Gzma","Rnaseh2c")
+Gene.name <- c("Trex1", "Ifrd1", "Ddost", "Rpn1", "Stt3b", "Krtcap2", "Tmem258", "Ostc", "Rnaseh2a", "Dad1", "Tusc3", "Stt3a", "Ankmy2", "Mef2c", "Ifnl2", "Sap30", "Fau" ,"Gm9843", "Dixdc1","Bhlhb9","Hdac1","Sin3b")
+Gene.stable.ID <- sprintf("Gene % d", 1:22)
 
-power <- est_power_distribution(n=5,f=0.01,rho=2,distributionObject=distribution,selectedGenes=c("Trex1", "Ifrd1", "Wrn","Atrip","Exo1","Rnaseh2b","Mb21d1","Rnaseh2a","Nme1","Gzma","Rnaseh2c"),storeProcess = TRUE)
-mean(power$power) # 0.2187556
+genelist <- data.frame(Gene.name, Gene.stable.ID)
+
+power <- est_power_distribution(n=5,f=0.01,rho=2,distributionObject=distribution,selectedGenes=genelist$Gene.name,storeProcess = TRUE)
+mean(power$power) # 0.217285
 ```
 
 From changing around FDR (`fdr` parameter in `est_power_curve()`) and coverage (`lambda0` parameter in `est_power_curve()`) as well as making an optimization plot, it appears that at least 10 samples are needed with an average coverage > 10 reads/gene depending on desired FDR in order to achieve >80% power. To be precise, 10 samples with 10 coverage and FDR=0.05 will give 82% power. To be safe, for the genes of interest we would need at least 13 samples to achieve 80% power.
@@ -99,3 +101,114 @@ ggplot(data=data.frame(counts=as.numeric(gene_readcounts),name=as.character(gene
 ```{r}
 gene_readcounts
 ```
+
+### Sample_Size_Distribution (genelist of all Cadherin and Integrin Genes)
+
+```{r}
+ss<-sample_size_distribution(f=0.05,distributionObject=distribution,selectedGenes=genelist$Gene.name,storeProcess = TRUE)
+ss
+```
+
+```{r, ss_drop10}
+names <- as.character(genelist$Gene.name[genelist$Gene.name %in% names(gene_readcounts)])
+to_drop <- names[which(gene_readcounts < 10)]
+ss_drop10 <- sample_size_distribution(f=0.1,distributionObject=distribution,selectedGenes=names(which(gene_readcounts>=10)),storeProcess = TRUE)
+# 76.7% power with N=9, 83.1% power with N=10
+ss_drop10
+```
+
+### Sample_Size_Distribution (genelist of all genes with read counts >= 80)
+
+```{r, ss_drop80}
+to_drop80 <- names[which(gene_readcounts < 80)]
+ss_drop80 <- sample_size_distribution(f=0.1,distributionObject=distribution,selectedGenes=names(which(gene_readcounts>=80)),storeProcess = TRUE)
+# basically when rho goes up and genes go down it works
+# so what exactly is rho?
+# basically effect size... so question: do we expect it to be bigger or smaller than in the 2 group situation?
+ss_drop80
+```
+
+### Sample_Size_Distribution (genelist of all genes with read counts >= 200)
+
+```{r, ss_drop200}
+to_drop200 <- names[which(gene_readcounts < 200)]
+ss_drop200 <- sample_size_distribution(f=0.1,distributionObject=distribution,selectedGenes=names(which(gene_readcounts>=200)),storeProcess = TRUE)
+```
+
+### Sample_Size_Distribution (genelist of all genes with read counts >= 80 and minimum fold change >=2.5)
+
+```{r, fold_size_change}
+ss_drop80_fold2.5 <- sample_size_distribution(f=0.1,rho=2.5,distributionObject=distribution,selectedGenes=names(which(gene_readcounts>=80)),storeProcess = TRUE)
+ss_drop80_fold2.5
+```
+
+### Sample_Size_Distribution (genelist of all genes that start with 'CAH' and 'ITGA'; a more restrictive list of Cadherin and Integrin without pseudogenes)
+
+```{r, kept_genes}
+kept <- append(rownames(genelist[grepl("Trex[0-9]+$", genelist$Gene.name), ]), rownames(genelist[grepl("Ifrd[0-9]+$", genelist$Gene.name), ]))
+genelist[kept,]$Gene.name[which(!genelist[kept,]$Gene.stable.ID %in% names(distribution$pseudo.counts.mean))]
+
+kept_final <- kept[which(genelist[kept,]$Gene.name %in% names(distribution$pseudo.counts.mean))]
+power_kept <- est_power_distribution(n=6,f=0.1,m=52000,m1=4000,distributionObject=distribution,selectedGenes=c("Trex1", "Ifrd1"),storeProcess = TRUE)
+mean(power_kept$power) #32% power with just kept genes and 6 samples each group
+ss_kept <- sample_size_distribution(f=0.1,rho=2,distributionObject=distribution,selectedGenes=c("Trex1", "Ifrd1"),storeProcess=TRUE)
+ss_kept
+```
+
+
+### List all of the Found Genes in the RNASeq expression data(not just the genelist) [45 Genes]
+
+```{r}
+found <- genelist[which(genelist$Gene.name %in% names(distribution$pseudo.counts.mean)),]
+nrow(found)
+```
+
+
+```{r, count_to_ss}
+found <- genelist[which(genelist$Gene.name %in% names(distribution$pseudo.counts.mean)),]
+found
+
+n <- 1:15
+gene_powers <- lapply(n, function(x) est_power_distribution(n=x, f=0.1, rho=2, distributionObject=distribution, m=52000,m1=4000,selectedGenes=found$Gene.name,storeProcess=TRUE)$power)
+num_genes <- sapply(gene_powers,function(x) sum(x>0.8))
+gene_powers_keptfinal <- lapply(n, function(x) est_power_distribution(n=x, f=0.1, rho=2, distributionObject=distribution, m=52000,m1=4000,selectedGenes=genelist[kept_final,]$Gene.name,storeProcess=TRUE)$power)
+
+# Trex1:
+musk_id <- which(found$Gene.name=='Trex1')
+musk_power <- sapply(gene_powers, function(x) x[musk_id])
+
+# Ifrd1:
+ifrd1_id <- which(found$Gene.name=='Ifrd1')
+ifrd1_power <- sapply(gene_powers, function(x) x[ifrd1_id])
+
+total_power <- sapply(gene_powers, function(x) mean(x))
+
+total_keptfinal <- sapply(gene_powers_keptfinal, function(x) mean(x))
+
+# Number of genes vs number of samples at power=0.8
+d <- data.frame(n,num_genes)
+ggplot(data=d,aes(x=n,y=num_genes,label=num_genes)) + geom_line() + geom_point() + theme_bw() + ylab("Number of genes with power > 0.8") + xlab("Number of samples in each group") + ggtitle("Number of genes of interest with sufficient power to detect\n as number of samples increases") + labs(caption="FDR=0.1,log fold change=2") + geom_text(data=subset(d, n>7),vjust=0,nudge_y=1) + scale_x_continuous(breaks=seq(1,15,2)) + scale_y_continuous(breaks=seq(0,70,10))
+
+# Gene powers random
+gene_powers_random <- sapply(n, function(x) est_power_distribution(n=x, f=0.1, rho=2, distributionObject=distribution, m=52000,m1=4000))
+
+# Power to detect musk and total power vs number of samples
+d2 <- data.frame(n,musk_power,ifrd1_power,total_power,gene_powers_random) %>% tidyr::gather("type","power",musk_power,ifrd1_power,total_power,gene_powers_random)
+ggplot(data=d2,aes(x=n)) + geom_line(aes(y=power,color=type)) + geom_point(aes(y=power,color=type)) + theme_bw() + ylab("Power") + xlab("Number of samples in each group") + ggtitle("Power for CDH1 gene and total power\n as number of samples increases") + labs(caption="FDR=0.1,log fold change=2,number of random genes=100") + geom_hline(yintercept=0.8,linetype='dashed') + scale_color_discrete(name="Power",breaks=c("musk_power","ifrd1_power","total_power","gene_powers_random"),labels=c("Trex1","Ifrd1","Total for interested genes","Random genes")) + scale_x_continuous(breaks=seq(1,15,2)) + scale_y_continuous(breaks=seq(0,1,0.2))
+```
+
+```{r, proper, eval=FALSE}
+avg_count <- transmute(dataMat,m1=(Innervated_WT_1+Innervated_WT_2)/2,m2=(Denervated_WT_1+Denervated_WT_2)/2)
+log2_fold <- log2(avg_count$m2/avg_count$m1)>2
+total_de<-sum(log2_fold[!is.na(log2_fold)]) # about 4000
+library(PROPER)
+ngenes = nrow(dataMat)
+simOptions = RNAseq.SimOptions.2grp(ngenes=ngenes,lBaselineExpr="bottomly",lOD="bottomly")
+simres = runSims(sim.opts=simOptions,nsims=20)
+powers = comparePower(simres, alpha.type='fdr', alpha.nominal=0.1, stratify.by='expr')
+```
+
+### TO-DO: Simulating Power for Highly Expressed, Medium Expressed and Lowly Expressed Genes
+
+
+# References
